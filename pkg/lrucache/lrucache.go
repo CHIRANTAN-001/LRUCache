@@ -81,8 +81,8 @@ func (c *LRUCache) moveToHead(node *Node) {
 // Put adds a key-value pair to the cache.
 // If the key already exists, it updates the value and moves the node to the head.
 func (c *LRUCache) Put(key string, value string) {
+	// If the key already exists, update the value and move to head
 	if node, ok := c.Cache[key]; ok {
-		// Update the value and move to head
 		node.Value = value
 		c.moveToHead(node)
 	}
@@ -140,4 +140,28 @@ func (c *LRUCache) IsEmpty() bool {
 func (c *LRUCache) Contains(key string) bool {
 	_, ok := c.Cache[key]
 	return ok
+}
+
+func (c *LRUCache) BatchPut(items map[string]string) {
+	for key, value := range items {
+		c.Put(key, value)
+	}
+}
+
+// BatchGet retrieves multiple values from the cache.
+func (c *LRUCache) BatchGet(keys []string) (map[string]string, bool) {
+	results := make(map[string]string)
+	for _, key := range keys {
+		if value, ok := c.Get(key); ok {
+			results[key] = value
+		} else {
+			results[key] = "" // or handle missing keys differently
+		}
+	}
+
+	if len(results) == 0 {
+		return nil, false
+	}
+
+	return results, true
 }
