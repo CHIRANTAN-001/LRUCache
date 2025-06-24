@@ -1,5 +1,7 @@
 package lrucache
 
+import "errors"
+
 // LRUCache implements a Least Recently Used (LRU) cache.
 // It uses a doubly linked list to maintain the order of usage and a map for O(1) access.
 // The cache evicts the least recently used item when it exceeds its capacity.
@@ -19,9 +21,9 @@ type LRUCache struct {
 }
 
 // NewLRUCache creates a new LRUCache Instance with the specified capacity.
-func NewLRUCache(capacity int) *LRUCache {
+func NewLRUCache(capacity int) (*LRUCache, error) {
 	if capacity <= 0 {
-		return nil
+		return nil, errors.New("invalid capacity: must be greater than 0")
 	}
 
 	return &LRUCache{
@@ -29,7 +31,7 @@ func NewLRUCache(capacity int) *LRUCache {
 		Head:     nil,
 		Tail:     nil,
 		Cache:    make(map[string]*Node),
-	}
+	} , nil
 }
 
 // Get retrieves the value for a given key from the cache.
