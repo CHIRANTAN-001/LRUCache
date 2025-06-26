@@ -1,6 +1,9 @@
 package lrucache
 
-import "errors"
+import (
+	"errors"
+	"sync"
+)
 
 // LRUCache implements a Least Recently Used (LRU) cache.
 // It uses a doubly linked list to maintain the order of usage and a map for O(1) access.
@@ -18,6 +21,7 @@ type LRUCache struct {
 	Head     *Node
 	Tail     *Node
 	Cache    map[string]*Node
+	mutex    sync.RWMutex
 }
 
 // NewLRUCache creates a new LRUCache Instance with the specified capacity.
@@ -31,11 +35,15 @@ func NewLRUCache(capacity int) (*LRUCache, error) {
 		Head:     nil,
 		Tail:     nil,
 		Cache:    make(map[string]*Node),
-	} , nil
+		mutex:    sync.RWMutex{},
+	}, nil
 }
 
 // Get retrieves the value for a given key from the cache.
+// Returns the value and true if found, empty string and false otherwise.
 func (c *LRUCache) Get(key string) (string, bool) {
+	c.mutex.Lock() // Use write lock since we modify the list order
+	defer c.mutex.Unlock()
 	if node, ok := c.Cache[key]; ok {
 		// Move the accessed node to the head of the list
 		c.moveToHead(node)
@@ -49,44 +57,66 @@ func (c *LRUCache) moveToHead(node *Node) {
 		return
 	}
 
-	// Detach the node from its current position
+	// Remove the node from its current position
+	c.removeNode(node)
+
+	// Add the node to the head of the list
+	c.addToHead(node)
+}
+
+// removeNode removes a node from the doubly linked list.
+func (c *LRUCache) removeNode(node *Node) {
 	if node.Prev != nil {
 		node.Prev.Next = node.Next
+	} else {
+		c.Head = node.Next // If it's the head, move head to next
 	}
 	if node.Next != nil {
 		node.Next.Prev = node.Prev
+	} else {
+		c.Tail = node.Prev // If it's the tail, move tail to prev
 	}
-	if c.Tail == node {
-		c.Tail = node.Prev
-	}
+}
 
-	// Move the node to the head
-	node.Next = c.Head
+// addToHead adds a node to the head of the doubly linked list.
+func (c *LRUCache) addToHead(node *Node) {
 	node.Prev = nil
+	node.Next = c.Head
+
 	if c.Head != nil {
 		c.Head.Prev = node
 	}
 	c.Head = node
 
-	// Adjust tail if necessary
 	if c.Tail == nil {
-		c.Tail = c.Head
+		c.Tail = node
 	}
-	if c.Tail != nil {
-		c.Tail.Next = nil
+}
+
+// removeTail removes the least recently used item (tail) from the cache.
+func (c *LRUCache) removeTail() *Node {
+	if c.Tail == nil {
+		return nil
 	}
 
-	// Update cache reference
-	c.Cache[node.Key] = node
+	tailNode := c.Tail
+	c.removeNode(tailNode)
+	return tailNode
 }
 
 // Put adds a key-value pair to the cache.
 // If the key already exists, it updates the value and moves the node to the head.
 func (c *LRUCache) Put(key string, value string) {
+	// Lock the cache for writing to ensure thread safety
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	// If the key already exists, update the value and move to head
 	if node, ok := c.Cache[key]; ok {
 		node.Value = value
+		// Move the node to the head of the list
 		c.moveToHead(node)
+		return
 	}
 
 	// Create a new node
@@ -95,34 +125,24 @@ func (c *LRUCache) Put(key string, value string) {
 		Value: value,
 	}
 
-	// Add the new node to the cache
-	c.Cache[key] = newNode
-
 	// If the cache is at capacity, remove the least recently used item
-	if len(c.Cache) > c.Capacity {
-		// Remove the least recently used item
-		delete(c.Cache, c.Tail.Key)
-		c.Tail = c.Tail.Prev
-		if c.Tail != nil {
-			c.Tail.Next = nil
-		} else {
-			c.Head = nil // If the list is now empty, reset head
+	if len(c.Cache) >= c.Capacity {
+		tail := c.removeTail()
+		if tail != nil {
+			delete(c.Cache, tail.Key)
 		}
 	}
-
-	// Insert the new node at the head of the list
-	if c.Head == nil {
-		c.Head = newNode
-		c.Tail = newNode
-	} else {
-		newNode.Next = c.Head
-		c.Head.Prev = newNode
-		c.Head = newNode
-	}
+	
+	// Add the new node to the cache
+	c.Cache[key] = newNode
+	c.addToHead(newNode)
 }
 
 // Clear removes all items from the cache.
 func (c *LRUCache) Clear() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	c.Head = nil
 	c.Tail = nil
 	c.Cache = make(map[string]*Node)
@@ -130,40 +150,23 @@ func (c *LRUCache) Clear() {
 
 // Size returns the current number of items in the cache.
 func (c *LRUCache) Size() int {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
 	return len(c.Cache)
 }
 
 // IsEmpty checks if the cache is empty.
 func (c *LRUCache) IsEmpty() bool {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
 	return len(c.Cache) == 0
 }
 
 // Contains checks if the cache contains a specific key.
-func (c *LRUCache) Contains(key string) bool {
+func (c *LRUCache) Has(key string) bool {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
 	_, ok := c.Cache[key]
 	return ok
 }
 
-func (c *LRUCache) BatchPut(items map[string]string) {
-	for key, value := range items {
-		c.Put(key, value)
-	}
-}
-
-// BatchGet retrieves multiple values from the cache.
-func (c *LRUCache) BatchGet(keys []string) (map[string]string, bool) {
-	results := make(map[string]string)
-	for _, key := range keys {
-		if value, ok := c.Get(key); ok {
-			results[key] = value
-		} else {
-			results[key] = "" // or handle missing keys differently
-		}
-	}
-
-	if len(results) == 0 {
-		return nil, false
-	}
-
-	return results, true
-}
